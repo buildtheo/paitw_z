@@ -17,13 +17,138 @@
 * Now scroll through the results, and see how Now Assist has filled in the AI Agent role, list of steps, and Agent name.
 * You will see a “**Possible duplications found**” dialog pop up, click “**Ignore and continue**”
 
-4. Click on “**Recommended Tools**”, a list of Suggested tools will appear, let’s select the relevant tools in this order by click on the “+” next to each tool type. Then Hit '**Save and Continue'**
+4. Click on “**Recommended Tools**”. A list of Suggested tools will appear.
 
-**\*\*\*If you don't see the tools below when you click Recommended Tools, add each tool manually using the Add tool button and choose the exact ones listed below from the existing. The instructor can help guide you\*\*\*\***
+{% hint style="warning" %}
+**Do NOT click “+” on the two Script tools** in the list ("ITSM incident resolution plan investigation AI agent - Fetch all data" and "Resolve and fetch similar knowledge articles"). On this lab image, those create Global-scope copies that fail when the agent runs ("Sorry, there was a problem on my side"). Build them yourself in steps 4a and 4b below.
+{% endhint %}
+
+Click “**+**” only on the **Flow action** “Collect relevant incident details for a problem”. Then hit '**Save and Continue'**
 
 <figure><img src="../.gitbook/assets/Unknown image (166)" alt=""><figcaption></figcaption></figure>
 
-We are missing one tool, so let’s create the following tools by selecting the **Add tool** option from the AI agent definition:
+**4a. Create the “Fetch all data” tool.** Select **Add tool > Script > A new script** and fill in:
+
+* **Name:** “ITSM incident resolution plan investigation AI agent - Fetch all data”
+* **Tool description:** “Gets incident details, similar incidents and relevant knowledge articles for an incident number.”
+* **Input parameters:** you MUST add this row, or the agent cannot pass the incident number to the tool
+
+| Input name      | Description                          |
+| --------------- | ------------------------------------ |
+| incident\_number | The incident number, e.g. INC0010248 |
+
+* **Script:**
+
+```javascript
+(function(inputs) {
+    var num = String(inputs.incident_number || inputs.number || inputs.incident || '').replace(/\s+/g, '').toUpperCase();
+    if (!num) return { error: 'No incident number received. Define input parameter incident_number on this tool.' };
+
+    var inc = new GlideRecord('incident');
+    inc.addQuery('number', num);
+    inc.setLimit(1);
+    inc.query();
+    if (!inc.next()) return { error: 'Incident not found: ' + num };
+
+    var sd = inc.getValue('short_description') || '';
+    var kw = sd.split(' ').filter(function(w) { return w.length > 3; });
+    var out = {
+        incident: {
+            number: inc.getValue('number'),
+            short_description: sd,
+            description: inc.getValue('description'),
+            category: inc.getDisplayValue('category'),
+            priority: inc.getDisplayValue('priority'),
+            state: inc.getDisplayValue('state')
+        },
+        similar_incidents: [],
+        knowledge_articles: []
+    };
+
+    if (kw.length) {
+        var sim = new GlideRecord('incident');
+        var sq = sim.addQuery('short_description', 'CONTAINS', kw[0]);
+        for (var i = 1; i < kw.length && i < 3; i++) sq.addOrCondition('short_description', 'CONTAINS', kw[i]);
+        sim.addQuery('sys_id', '!=', inc.getUniqueValue());
+        sim.setLimit(5);
+        sim.query();
+        while (sim.next()) out.similar_incidents.push({
+            number: sim.getValue('number'),
+            short_description: sim.getValue('short_description'),
+            state: sim.getDisplayValue('state'),
+            resolution_notes: sim.getValue('close_notes')
+        });
+
+        var kb = new GlideRecord('kb_knowledge');
+        kb.addQuery('workflow_state', 'published');
+        var kq = kb.addQuery('short_description', 'CONTAINS', kw[0]);
+        for (var j = 1; j < kw.length && j < 3; j++) kq.addOrCondition('short_description', 'CONTAINS', kw[j]);
+        kb.setLimit(5);
+        kb.query();
+        while (kb.next()) out.knowledge_articles.push({
+            number: kb.getValue('number'),
+            short_description: kb.getValue('short_description')
+        });
+    }
+    return out;
+})(inputs);
+```
+
+* **Execution mode:** Supervised
+* **Display output:** Yes
+* Click **Add**
+
+**4b. Create the “Resolve and fetch similar knowledge articles” tool.** Select **Add tool > Script > A new script** and fill in:
+
+* **Name:** “Resolve and fetch similar knowledge articles”
+* **Tool description:** “Fetches published knowledge articles related to the incident's short description.”
+* **Input parameters:** add the same row as in 4a
+
+| Input name      | Description                          |
+| --------------- | ------------------------------------ |
+| incident\_number | The incident number, e.g. INC0010248 |
+
+* **Script:**
+
+```javascript
+(function(inputs) {
+    var num = String(inputs.incident_number || inputs.number || inputs.incident || '').replace(/\s+/g, '').toUpperCase();
+    if (!num) return { error: 'No incident number received. Define input parameter incident_number on this tool.' };
+
+    var inc = new GlideRecord('incident');
+    inc.addQuery('number', num);
+    inc.setLimit(1);
+    inc.query();
+    if (!inc.next()) return { error: 'Incident not found: ' + num };
+
+    var words = (inc.getValue('short_description') || '').split(' ').filter(function(w) { return w.length > 3; });
+    var articles = [];
+    if (words.length) {
+        var kb = new GlideRecord('kb_knowledge');
+        kb.addQuery('workflow_state', 'published');
+        var qc = kb.addQuery('short_description', 'CONTAINS', words[0]);
+        for (var i = 1; i < words.length && i < 3; i++) qc.addOrCondition('short_description', 'CONTAINS', words[i]);
+        kb.setLimit(5);
+        kb.query();
+        while (kb.next()) articles.push({
+            number: kb.getValue('number'),
+            short_description: kb.getValue('short_description'),
+            link: '/kb_view.do?sysparm_article=' + kb.getValue('number')
+        });
+    }
+    return { articles: articles };
+})(inputs);
+```
+
+* **Execution mode:** Supervised
+* **Display output:** Yes
+* Click **Add**
+
+{% hint style="info" %}
+If the agent later asks you for the incident number, the tool's **Input parameters** table is empty. Open the tool, add `incident_number`, and save.
+{% endhint %}
+
+We still need two more tools, so let’s create the following tools by selecting the **Add tool** option from the AI agent definition:
 
 5. Create the next tool by selecting **Add tool**:
 
